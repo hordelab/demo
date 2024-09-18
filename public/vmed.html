@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoiceMed Demo</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/milligram@1.4.1/dist/milligram.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        html {
+            width: 100%;
+            height: 100%;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            margin: 0;
+            height: 100%;
+        }
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        section {
+            padding: 20px;
+            margin: 10px 0;
+            background-color: #f4f4f4;
+            border-radius: 5px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        section p {
+            white-space: preserve;
+        }
+
+        .button-row {
+            background-color: #333;
+            color: #fff;
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 0;
+        }
+        .button-row button {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 150%;
+        }
+        #page-start {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        #page-login, #page-setup {
+            display: flex;
+            justify-content: space-around;
+            text-align: center;
+        }
+        #transcript-input {
+            resize: none;
+            height: 100%;
+        }
+
+        button.process {
+            background-color: green;
+        }
+        button.recording {
+            background-color: red;
+        }
+
+        .index-entry {
+            padding: 20px;
+            margin: 10px 0;
+            background-color: #f4f4f4;
+            border-radius: 5px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: box-shadow 0.3s;
+        }
+        .index-entry:hover {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+        }
+        .index-entry-time {
+            font-weight: bold;
+        }
+        .index-entry-text {
+            white-space: preserve;
+        }
+
+        #record-button {
+            border-radius: 100%;
+            width: 100px;
+            height: 100px;
+            text-align: center;
+            font-size: 150%;
+
+            margin-bottom: 50px;
+
+            background-color: green;
+            border: none;
+        }
+
+        #record-button.recording {
+            background-color: #f21;
+        }
+
+        .action-button {
+            width: 80%;
+        }
+
+        .section-icon {
+            font-size: 130%;
+            margin-right: 10px;
+        }
+
+        #page-content button {
+            background-color: inherit;
+            border: 1px solid lightgray;
+            color: inherit;
+        }
+
+        #page-content button:hover {
+            border: 1px solid gray;
+        }
+    </style>
+</head>
+<body>
+    <main id="page-login">
+        <h2>Bienvenido a<br>VoiceMed</h2>
+        <div>
+            <input placeholder="email" id="emailInput">
+            <button onclick="login(emailInput.value)">Entrar</button>
+        </div>
+    </main>
+
+    <main id="page-setup" style="display: none;">
+        <h2>Configuración de Usuario</h2>
+        <div>
+            <input placeholder="name" id="setupNameInput" onchange="userData.name = this.value">
+            <input placeholder="specialty" id="setupSpecialtyInput" onchange="userData.specialty = this.value">
+            <button id="login-button" onclick="endSetup()">Terminar</button>
+        </div>
+    </main>
+
+    <main id="page-start" style="display: none;">
+        <button id="record-button">
+            <i class="fas fa-microphone"></i>
+        </button>
+        <button class="action-button" onclick="alert('File Upload Not Available')">Cargar Archivo de Audio</button>
+        <button class="action-button" onclick="alert('File Upload Not Available')">Cargar Archivo de Transcripción</button>
+        <button class="action-button" onclick="generateTranscriptClick()">Generar Transcripción con IA</button>
+    </main>
+
+    <main id="page-text" style="display: none;">
+        <textarea id="transcript-input"></textarea>
+        <button class="process" onclick="processTranscriptClick()">Procesar Sesión</button>
+    </main>
+
+    <main id="page-content" style="display: none;">
+        <div>
+            <strong><span id="session-date-span"></span></strong>
+        </div>
+        <section>
+            <h2>Resumen</h2>
+            <p id="section-x" contenteditable="true"></p>
+            <div class="section-buttons">
+                <button class="section-button" onclick="copySection('section-x')">
+                    <i class="fas fa-copy section-icon"></i>Copiar al Portapapeles
+                </button>
+            </div>
+        </section>
+
+        <section>
+            <h2>Subjetivo</h2>
+            <p id="section-s" contenteditable="true"></p>
+            <div class="section-buttons">
+                <button class="section-button" onclick="copySection('section-s')">
+                    <i class="fas fa-copy section-icon"></i>Copiar al Portapapeles
+                </button>
+            </div>
+        </section>
+
+        <section>
+            <h2>Objetivo</h2>
+            <p id="section-o" contenteditable="true"></p>
+            <div class="section-buttons">
+                <button class="section-button" onclick="copySection('section-o')">
+                    <i class="fas fa-copy section-icon"></i>Copiar al Portapapeles
+                </button>
+            </div>
+        </section>
+    
+        <section>
+            <h2>Evaluación</h2>
+            <p id="section-a" contenteditable="true"></p>
+            <div class="section-buttons">
+                <button class="section-button" onclick="copySection('section-a')">
+                    <i class="fas fa-copy section-icon"></i>Copiar al Portapapeles
+                </button>
+            </div>
+        </section>
+    
+        <section>
+            <h2>Plan</h2>
+            <p id="section-p" contenteditable="true"></p>
+            <div class="section-buttons">
+                <button class="section-button" onclick="copySection('section-p')">
+                    <i class="fas fa-copy section-icon"></i>Copiar al Portapapeles
+                </button>
+            </div>
+        </section>
+    
+        <section>
+            <h2>Instrucciones</h2>
+            <p id="section-i" contenteditable="true"></p>
+            <div class="section-buttons">
+                <button class="section-button" onclick="copySection('section-i')">
+                    <i class="fas fa-copy section-icon"></i>Copiar al Portapapeles
+                </button>
+            </div>
+        </section>
+    
+        <section>
+            <h2>Transcripción</h2>
+            <p id="section-t" contenteditable="true"></p>
+            <div class="section-buttons">
+                <button class="section-button" onclick="copySection('section-t')">
+                    <i class="fas fa-copy section-icon"></i>Copiar al Portapapeles
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <main id="page-index" style="display: none;">
+        <h2>Historial</h2>
+        <div id="index-container">
+            <!--div class="index-entry">
+                <div><strong>12/7/2024, 10:02:41 a. m.</strong></div>
+                <div>El paciente no sabe qué hacer con su vida</div>
+            </div-->
+        </div>
+    </main>
+
+    <div class="button-row" id="bottomButtonRow" style="display: none;">
+        <button onclick="switchPage('page-start')"><i class="fas fa-home"></i></button>
+        <button onclick="loadIndex(); switchPage('page-index')"><i class="fas fa-hospital-user"></i></button>
+        <button onclick="switchPage('page-content')"><i class="fas fa-pen-to-square"></i></button>
+    </div>
+
+    <script src="horde.js"></script>
+    <script src="utils.js"></script>
+    <script>
+        // Audio Processing Functions
+
+        function getFormatExtension(mimeType) {
+          const map = {
+              'audio/mpeg': 'mp3',
+              'audio/wav': 'wav',
+              'audio/ogg': 'ogg',
+          };
+          return map[mimeType] || '';
+        }
+
+        function processBlob(blob) {
+          return new Promise(resolve => {
+            // Get the extension for the blob type
+            const ext = getFormatExtension(blob.type);
+            
+            // Use FileReader to convert Blob to Base64 string
+            const reader = new FileReader();
+            
+            reader.onloadend = function() {
+              // Extract raw base64 data from the result
+              const base64Full = reader.result;
+              const base64data = base64Full.split(',')[1];  // Remove the 'data:[<mediatype>][;base64],' part
+
+              const CHUNK_SIZE = 1024;
+
+              // https://stackoverflow.com/questions/7033639
+              let chunks = base64data.match(new RegExp(`.{1,${CHUNK_SIZE}}`, "g"));
+
+              // Log the chunks
+              resolve({chunks: chunks, extension: ext});
+            };
+
+            // Read the blob as a data URL to get a Base64-encoded string
+            reader.readAsDataURL(blob);
+          })
+        }
+
+        async function submitAudio(blob) {
+          let {chunks, extension} = await processBlob(blob);
+
+          let filename = "voice-in." + extension;
+          let stream = await handle('stream/create');
+
+          let writeProm = handle('files/write', {
+            path: filename,
+            binary: true,
+            content: stream,
+          });
+
+          for (let chunk of chunks) {
+            await handle('stream/feed', {
+              id: stream.id,
+              data: chunk,
+            });
+          }
+
+          await handle('stream/close', { id: stream.id });
+
+          // Await for full file write
+          await writeProm
+
+          return filename;
+        }
+    </script>
+    <script>
+        //=== User Management ===//
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        var userFile;
+        var userData = {
+            history: [],
+        };
+        var session = {};
+
+        async function login (email) {
+            if (!emailRegex.test(email)) {
+                alert("Please enter a valid email");
+                return;
+            }
+
+            userFile = "vmed/" + email
+                .replace(/@/g, '_at_')
+                .replace(/\./g, '_dot_')
+                .replace(/[\W_]/g, '_');
+
+            let res = await handle("files/read", {path: userFile});
+            if (!res.content && !res.exists) {
+                switchPage('page-setup');
+            } else {
+                userData = JSON.parse(res.content);
+
+                bottomButtonRow.style.display = null;
+                switchPage('page-start');
+            }
+        }
+
+        async function endSetup () {
+            //saveUserData();
+
+            bottomButtonRow.style.display = null;
+            switchPage('page-start');
+        }
+
+        async function saveUserData () {
+            console.log("user data", userData);
+
+            let res = await handle("files/write", {
+                path: userFile,
+                content: JSON.stringify(userData),
+            });
+
+            console.log("file write", res);
+        }
+
+        async function createSession () {
+            session = {
+                time: Date.now(),
+            };
+            userData.history.push(session);
+            console.log(`Created session #${userData.history.length - 1} (T ${session.time})`)
+            return session;
+        }
+
+        async function fillSession (data) {
+            Object.assign(session, data);
+            saveUserData();
+        }
+
+        let indexElem = document.getElementById('index-container');
+        function loadIndex () {
+            if (userData.history.length) {
+                indexElem.innerHTML = "";
+
+                for (let entry of userData.history) {
+                    let entryElem = document.createElement("div");
+                    entryElem.className = "index-entry";
+
+                    let timeElem = document.createElement("div");
+                    timeElem.textContent = new Date(entry.time).toLocaleString();
+                    timeElem.className = "index-entry-time";
+
+                    let textElem = document.createElement("div");
+                    textElem.textContent = entry.summary;
+                    textElem.className = "index-entry-text";
+
+                    entryElem.appendChild(timeElem);
+                    entryElem.appendChild(textElem);
+
+                    indexElem.appendChild(entryElem);
+
+                    entryElem.addEventListener("click", function () {
+                        session = entry;
+                        fillData(entry);
+                        switchPage('page-content');
+                    });
+                }
+            } else {
+                indexElem.textContent = "No hay sesiones"
+            }
+        }
+    </script>
+    <script>
+        function switchPage(pageName) {
+            document.getElementById('page-login').style.display = 'none';
+            document.getElementById('page-setup').style.display = 'none';
+            document.getElementById('page-start').style.display = 'none';
+            document.getElementById('page-text').style.display = 'none';
+            document.getElementById('page-index').style.display = 'none';
+            document.getElementById('page-content').style.display = 'none';
+            document.getElementById(pageName).style.display = null;
+        }
+
+        function fillData (data) {
+            document.getElementById("section-x").textContent = data.summary;
+
+            document.getElementById("section-s").textContent = data.subjective;
+            document.getElementById("section-o").textContent = data.objective;
+            document.getElementById("section-a").textContent = data.assessment;
+            document.getElementById("section-p").textContent = data.plan;
+            document.getElementById("section-i").textContent = data.instructions;
+
+            document.getElementById("section-t").textContent = data.transcript;
+
+            document.getElementById("session-date-span").textContent =
+                new Date(data.time).toLocaleString();;
+        }
+
+        function copySection (sectionId) {
+            let sectionElem = document.getElementById(sectionId);
+            let text = sectionElem.textContent;
+
+            navigator.clipboard.writeText(text)
+              .then(() => console.log('Text copied to clipboard'))
+              .catch(err => console.error('Failed to copy text: ', err));
+        }
+
+        async function processTranscript (text) {
+            let filler = "waiting...";
+            fillData({
+                summary: filler,
+                objective: filler,
+                subjective: filler,
+                assessment: filler,
+                plan: filler,
+                instructions: filler,
+
+                transcript: text,
+            });
+
+            createSession();
+
+            let res = await handle('scripts/40', { transcript: text });
+
+            console.log(res);
+            res.transcript = text;
+            fillData(res);
+
+            fillSession(res);
+        }
+
+        function processTranscriptClick () {
+            let text = document.getElementById("transcript-input").value;
+            if (!text || !text.trim()) {
+                alert("Please enter a session transcription");
+                return;
+            }
+
+            processTranscript(text);
+            switchPage('page-content');
+        }
+
+        async function generateTranscriptClick () {
+            document.getElementById("transcript-input").value = "Generating Conversation...";
+            switchPage('page-text');
+
+            let res = await handle("scripts/chat_completion", {
+                model: "gpt-3.5",
+                stream_moce: false,
+                messages: [{
+                    "role": "user",
+                    "content": "Escribe una transcripción de una sesión hipotética con un doctor especialista.",
+                }]
+            });
+            document.getElementById("transcript-input").value = res.output;
+        }
+
+        let isRecording = false;
+
+        let recordButton = document.getElementById("record-button");
+        recordButton.addEventListener('click', async function () {
+            if (isRecording) {
+                isRecording = false;
+                let blob = await stopRecording();
+
+
+                recordButton.classList.remove("recording");
+
+                document.getElementById("transcript-input").value = "Processing Recording...";
+                switchPage('page-text');
+
+                let filename = await submitAudio(blob);
+                console.log("Uploaded to: " + filename);
+
+                let res = await handle("whisper/transcription", {
+                    'path': filename
+                });
+                console.log("transcription Result\n" + JSON.stringify(res));
+
+                document.getElementById("transcript-input").value = res.transcript;
+            } else {
+                if (await startRecording()) {
+                    isRecording = true;
+                    recordButton.classList.add("recording");
+                } else {
+                    alert("Could not start recording");
+                    recordButton.classList.remove("recording");
+                    recordButton.classList.remove("waiting");
+                }
+            }
+        });
+    </script>
+</body>
+</html>

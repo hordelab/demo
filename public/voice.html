@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Responsive Buttons Page</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+<style>
+  body {
+    background-color: beige;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+  }
+  .main-button {
+    border: none;
+    background-color: gray;
+    color: white;
+    border-radius: 50%;
+    width: 60px;
+    height: 60px;
+    font-size: 24px;
+    cursor: pointer;
+  }
+  .row {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+    justify-content: center;
+  }
+  button {
+    background: #bb7;
+    border: none;
+    border-radius: 5px;
+    width: 40px;
+    height: 40px;
+    cursor: pointer;
+  }
+  button:hover {
+    background: #dda;
+  }
+
+  .text {
+    letter-spacing: 0.05em;
+    color: #442;
+    height: 2em;
+    overflow-y: visible;
+    white-space: preserve;
+    text-align: center;
+    padding: 1em;
+  }
+</style>
+</head>
+<body>
+<div>
+  <div class="row">
+    <button id="mainButton" class="main-button"><i class="fas fa-microphone"></i></button>
+  </div>
+  <div class="row">
+    <button onclick="unsupported('enviar enlaces')"><i class="fas fa-link"></i></button>
+    <button onclick="unsupported('subir archivos')"><i class="fas fa-upload"></i></button>
+    <button onclick="unsupported('tomar fotos')"><i class="fas fa-camera"></i></button>
+    <button id="settingsButton"><i class="fas fa-gear"></i></button>
+  </div>
+  <div class="row text" id="textContainer">
+  </div>
+</div>
+
+<script>
+  function setButtonMode(state) {
+    const mainButton = document.getElementById('mainButton');
+    const icon = mainButton.querySelector('i');
+    switch(state) {
+      case 'record':
+        mainButton.style.backgroundColor = 'green';
+        icon.className = 'fas fa-microphone';
+        break;
+      case 'stop':
+        mainButton.style.backgroundColor = 'red';
+        icon.className = 'fas fa-square';
+        break;
+      case 'process':
+        mainButton.style.backgroundColor = 'gray';
+        icon.className = 'fas fa-spinner fa-spin';
+        break;
+    }
+  }
+
+  setButtonMode('record');
+
+  let textTimeout;
+  function showText(text) {
+    // Get the element by its ID
+    const textContainer = document.getElementById('textContainer');
+
+    // Ensure the element is initially visible and reset any ongoing animation
+    textContainer.style.opacity = '1';
+    textContainer.style.transition = 'none';
+
+    // Set the text of the element
+    textContainer.textContent = text;
+
+    // Use setTimeout to delay the fade out process
+    if (textTimeout) clearTimeout(textTimeout);
+    textTimeout = setTimeout(() => {
+      // Begin fading out after 2 seconds
+      textContainer.style.transition = 'opacity 2s';
+      textContainer.style.opacity = '0';
+    }, 2000);
+  }
+
+  function unsupported (name) {
+    showText(`Esta funcionalidad (${name}) aún no está disponible`);
+  }
+</script>
+
+<script src="horde.js"></script>
+<script src="voice.js"></script>
+</body>
+</html>

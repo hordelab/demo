@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+<title>Web Application Layout</title>
+<style>
+  /*== Reset and Baseline == */
+  html, body {
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: sans-serif;
+  }
+
+  iframe {
+    margin: 0;
+    padding: 0;
+  }
+
+  .container {
+    display: flex;
+    height: 100vh;
+  }
+
+  .content-panel, .chat-panel {
+    width: 50%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .content-panel {
+    border-left: 1px solid gray;
+  }
+
+  #message-history {
+    overflow-y: auto;
+    flex: 1;
+    padding: 10px;
+  }
+
+  .message {
+    background-color: #f0f0f0;
+    color: #333;
+    border-radius: 5px;
+    padding: 0.5em 0.8em;
+    margin-bottom: 0.7em;
+    border: 1px solid #bbb;
+    white-space: preserve;
+  }
+
+  .message.outgoing {
+    margin-left: 1em;
+    align-self: flex-end;
+  }
+
+  .message.incoming {
+    margin-right: 1em;
+    align-self: flex-start;
+  }
+
+  .input-area {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    height: 5em;
+    border-top: 1px solid gray;
+  }
+
+  .input-area textarea {
+    flex: 1;
+    resize: none;
+    padding: 5px;
+    margin-right: 10px;
+    height: 100%;
+  }
+
+  .border-left {
+    position: absolute;
+    width: 1px;
+    height: 100%;
+    border-left: 1px solid gray;
+  }
+
+  #previewFrame {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    border: none;
+  }
+
+  /*== Tabs ==*/
+
+  .tab-content {
+    height: 100%;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    overflow: auto;
+  }
+
+  .tab-bar {
+    background-color: #f2f2f2;
+    display: flex;
+    padding: 0.4em;
+    padding-bottom: 0;
+    border-bottom: 1px solid gray;
+  }
+
+  .tab {
+    padding: 0.3em 0.5em;
+    margin-right: 0.4em;
+    background-color: #e0e0e0;
+    border: 1px solid gray;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+  }
+
+  .tab.active {
+    background-color: #ffffff;
+    border-bottom: 1px solid #ffffff;
+  }
+
+  /*== Top Bar ==*/
+  .top-bar {
+    background-color: #f2f2f2;
+    display: flex;
+    justify-content: space-around;
+    padding: 0.5em;
+    border-bottom: 1px solid gray;
+    justify-content: flex-start;
+  }
+
+  .top-bar-button {
+    background-color: #e0e0e0;
+    border: 1px solid gray;
+    padding: 0.3em 0.5em;
+    cursor: pointer;
+    /* Added to remove the thick border between buttons */
+    margin-right: -1px;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="chat-panel">
+    <div class="top-bar">
+      <button class="top-bar-button" onclick="pageHistoryBack()">Undo</button>
+      <button class="top-bar-button" onclick="pageHistoryForward()">Redo</button>
+      <button class="top-bar-button" onclick="alert('todo')">Reset Chat</button>
+    </div>
+    <div id="message-history">
+    </div>
+    <div class="input-area">
+      <textarea id="messageInput" placeholder="Type a message..."></textarea>
+      <button id="sendButton">Send</button>
+    </div>
+  </div>
+  <div class="content-panel">
+    <div class="tab-bar">
+      <div class="tab" data-tab="preview">Preview</div>
+      <div class="tab" data-tab="code">Code</div>
+    </div>
+    <div data-tab="preview" class="tab-content">
+      <iframe id="previewFrame"></iframe>
+    </div>
+    <div data-tab="code" class="tab-content" style="display:none;">
+      <pre id="codeContainer">
+        Code
+      </pre>
+    </div>
+  </div>
+</div>
+
+<script src="horde.js"></script>
+
+<script type="application/javascript">
+  //=== Page Loading ===//
+  // setting this value lets the llm be less confused
+  let pageSourceCode = "<!DOCTYPE html>\n<html><!html>";
+
+  const pageHistory = [];
+  let historyIndex = -1;
+
+  function updatePageHistory(newPageSource) {
+    pageHistory.splice(historyIndex + 1);
+    pageHistory.push(newPageSource);
+    historyIndex++;
+  }
+
+  function pageHistoryBack() {
+    if (historyIndex > 0) {
+      historyIndex--;
+      loadPageSource(pageHistory[historyIndex]);
+    }
+  }
+
+  function pageHistoryForward() {
+    if (historyIndex < pageHistory.length - 1) {
+      historyIndex++;
+      loadPageSource(pageHistory[historyIndex]);
+    }
+  }
+
+  function loadPageSource (newSource) {
+    pageSourceCode = newSource;
+
+    var blob = new Blob([newSource], { type: 'text/html' });
+    var url = URL.createObjectURL(blob);
+
+    document.getElementById('previewFrame').src = url;
+    document.getElementById('codeContainer').textContent = newSource;
+  }
+</script>
+
+<script type="text/javascript">
+  //=== Chat and Bot Handling ===//
+
+  let agentAction = "scripts/42";
+  const history = [];
+
+  async function agentProcess (message) {
+    let res = await handle(agentAction, {
+      messages: history,
+      current_file: pageSourceCode,
+    });
+
+    console.log("agent action response", res);
+
+    addMessage('incoming', res.response);
+    if (res.new_file) {
+      updatePageHistory(res.new_file);
+      loadPageSource(res.new_file);
+    }
+  }
+
+  function addMessage(type, content) {
+      const typeRoles = {outgoing: 'user', incoming: 'assistant'};
+      const message = {
+        content,
+        role: typeRoles[type],
+      };
+      history.push(message);
+
+      const newMessage = document.createElement('div');
+      newMessage.textContent = content;
+      newMessage.className = `message ${type}`;
+      document.getElementById('message-history').appendChild(newMessage);
+  }
+
+  document.getElementById('sendButton').addEventListener('click', function() {
+      const message = document.getElementById('messageInput').value;
+      addMessage('outgoing', message);
+      document.getElementById('messageInput').value = '';
+
+      agentProcess();
+  });
+</script>
+
+<script type="application/javascript">
+  //=== Tabs ===//
+
+  function openTab(name, tabButton) {
+    const tabs = document.getElementsByClassName('tab-content');
+    for (let tab of tabs) {
+      if (tab.getAttribute('data-tab') === name) {
+        tab.style.display = '';
+      } else {
+        tab.style.display = 'none';
+      }
+    }
+
+    const allTabButtons = document.querySelectorAll('.tab');
+    allTabButtons.forEach(btn => {
+      if (btn === tabButton) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+  }
+
+  const tabButtons = document.querySelectorAll('.tab');
+  tabButtons.forEach(btn => {
+    btn.addEventListener('click', function() {
+      const tabName = this.getAttribute('data-tab');
+      openTab(tabName, this);
+    });
+  });
+</script>
+
+</body>
+</html>
