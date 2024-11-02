@@ -1,141 +1,59 @@
+// Used as default. Pass the host url to Horde constructor instead.
 const HORDE_URL = "wss://host.hordelab.com";
 
-// Variable where the websocket goes
-var ws;
+// Time to wait when a request doesn't go through, in milliseconds.
+const RETRY_TIME = 300;
 
-// Request Identifier
-var nonce = 0;
+const configPromise = Promise.resolve({
+    hostUrl: HORDE_URL
+});
 
-// Dictionary of listeners of a value, which is usually a response to most messages
-const valueListeners = {};
+var _root_horde = null;
 
-function onMessage (ev) {
-    let {name, data} = JSON.parse(ev.data);
-    handleMessage(name, data);
-}
-
-// Linear backoff. in Milliseconds. Starts at 1000 and adds 500 per try
-var backoff = 1000;
-
-function connectWS () {
-    ws = new Promise(resolve => {
-        let _ws = new WebSocket(HORDE_URL);
-        _ws.onmessage = onMessage;
-        _ws.onopen = () => {
-            backoff = 1000;
-            resolve(_ws);
-        }
-        _ws.onerror = err => {
-            console.error("WebSocket error", err.message || err.error && err.error.code)
-        }
-        _ws.onclose = () => {
-            setTimeout(() => {
-                console.log()
-                backoff += 500;
-                console.log("Retry connection");
-                connectWS();
-            }, backoff)
-        }
-    });
-
-    return ws;
-}
-
-connectWS();
-
-
-function addValueListeners (nonce, callback) {
-    valueListeners[nonce] = callback;
-}
-
-function handleMessage (name, data = {}) {
-    switch (name) {
-        case "value": {
-            let listener = valueListeners[data.nonce];
-            if (listener) {
-                listener(data);
-            } else {
-                console.warn("Value was received without listener. Nonce: %s, Value:", data.nonce, data.value)
-            }
-            break;
-        }
-        case "error": {
-            let listener = valueListeners[data.nonce];
-            if (listener) {
-                listener(new Error("Horde Error: " + data.message));;
-            } else {
-                console.error("Uncaught Horde Error: " + data.message);
-            }
-            break;
-        }
-        default: {
-            console.error("Received unknown message", name);
-        }
+function decodeNet (value) {
+    if (value instanceof Array) {
+        return value.map(decodeNet);
     }
-}
-
-async function send (name, data) {
-    (await ws).send(JSON.stringify({ name, data }))
-}
-
-
-// Public Interface
-
-async function handle (name, data) {
-    if (data == null) data = {};
-    data.nonce = nonce++;
-
-    let prom = new Promise((resolve, reject) => {
-        addValueListeners(data.nonce, val => {
-            if (val instanceof Error) {
-                reject(val);
-            } else {
-                resolve(val);
-            }
-        });
-    });
-
-    await send(name, data);
-
-    let res = await prom;
-    return res.value;
-}
-
-async function readStream (streamId, chunkFn, endFn) {
-    let data = {
-        id: streamId,
-        nonce: nonce++,
-    };
-
-    addValueListeners(data.nonce, streamData => {
-        if (streamData.eof) {
-            endFn()
-        } else {
-            chunkFn(streamData.value)
+    if (value instanceof Object) {
+        if (value['$horde'] == 'stream') {
+            return new Stream(_root_horde, value.id);
         }
-    });
+        return Object.fromEntries(
+            Object.entries(value).map(
+                ([k, v]) => [k, decodeNet(v)]
+            )
+        );
+    }
 
-    await send("stream/read", data);
+    // fallthrough
+    return value;
 }
 
-async function observe (path, updateFn) {
-    let data = {
-        path: path,
-        nonce: nonce++,
-    };
-
-    addValueListeners(data.nonce, updateData => {
-        updateFn(updateData.path, updateData.value);
-    });
-
-    await send("model/observe", data);
-    return async () => {
-        await send("model/cancel", {nonce: data.nonce});
+function encodeNet (value) {
+    if (value instanceof Stream) {
+        return {
+            '$horde': 'stream',
+            'id': value.id,
+        };
     }
+    if (value instanceof Array) {
+        return value.map(encodeNet);
+    }
+    if (value instanceof Object) {
+        return Object.fromEntries(
+            Object.entries(value).map(
+                ([k, v]) => [k, encodeNet(v)]
+            )
+        );
+    }
+
+    // fallthrough
+    return value;
 }
 
 class Stream {
-    constructor (id) {
+    constructor (horde, id) {
+        this.horde = horde;
         this.id = id;
         this.partialContent = "";
         this.eof = false;
@@ -145,23 +63,24 @@ class Stream {
             end: [],
         };
 
-        readStream(id,
-            delta => {
+        this.horde.sendWs({
+            path: 'stream',
+            body: {id: this.id},
+            onResponse: (msg) => {
                 if (this.eof) return;
 
-                this.partialContent += delta;
-                this.handle("data", delta);
-            },
-            () => {
-                if (this.eof) return;
-
-                this.eof = true;
-                this.handle("end");
+                if (msg.eof) {
+                    this.eof = true;
+                    this.handle('end');
+                } else {
+                    this.partialContent += msg.data;
+                    this.handle('data', msg.data);
+                }
             }
-        );
+        });
 
         this.contentPromise = new Promise((resolve, reject) => {
-            this.on("end", () => {
+            this.handle("end", () => {
                 resolve(this.partialContent);
             });
         });
@@ -180,8 +99,396 @@ class Stream {
     on (event, callback) {
         this.listeners[event].push(callback);
 
+        if (event == "data" && this.partialContent) {
+            callback(this.partialContent);
+        }
         if (event == "end" && this.eof) {
             callback();
         }
     }
 }
+
+class Instance {
+    constructor (horde, model, id) {
+        this.horde = horde;
+        this.model = model;
+        this.id = id;
+    }
+
+    async get () {
+        let res = await this.horde.send(`/m/${this.model}`, {
+            args: {id: this.id},
+        });
+        return res.value;
+    }
+
+    async update (subpath, value) {
+        let res = await this.horde.send(`/m/${this.model}`, {
+            args: {
+                id: this.id,
+                subpath: subpath
+                    .map(s => String(s).replace('.', '\\.'))
+                    .join('.'),
+            },
+            method: 'POST',
+            body: value
+        });
+        return res;
+    }
+
+    // Deletes the instance in the server
+    async remove () {
+        console.log("Delete", this.id)
+        let res = await this.horde.send(`/m/${this.model}/delete`, {
+            args: {
+                id: this.id,
+            },
+            method: 'POST',
+        });
+        // res.success == true
+    }
+
+    observe (callback) {
+        let sendRequest = () => {
+            console.log("observe request", this.model, this.id);
+
+            this.horde.sendWs({
+                path: `/m/observe`,
+                body: {
+                    model: this.model,
+                    handle: this.id,
+                },
+                onResponse (msg) {
+                    callback(msg.subpath, decodeNet(msg.value));
+                }
+            });
+        };
+        this.horde.closeListeners.push(sendRequest);
+        sendRequest();
+    }
+}
+
+class Horde {
+    constructor (host = HORDE_URL) {
+        this.host = host;
+
+        if (_root_horde == null)
+            _root_horde = this;
+
+        this.lastConnection = new Date();
+        this.websocketReady = false;
+        this.websocketNonce = 0;
+        this.websocketQueue = [];
+        this.nonceListeners = {};
+        this.closeListeners = []
+        this.connectWebsocket();
+    }
+
+    async connectWebsocket () {
+        console.log("connectWebsocket", Boolean(this.ws));
+        if (this.ws) return;
+
+        const wsUrl = this.host.replace(/^http/, 'ws').replace(/^https/, 'wss') + '/ws';
+        console.log("Connect WebSocket to ", wsUrl);
+        this.ws = new WebSocket(wsUrl);
+        this.websocketReady = false;
+
+        this.ws.onopen = () => {
+            // Make lastConnection be the last reconnection attempt
+            this.lastConnection = new Date();
+            this.configureWebsocket();
+
+            this.websocketReady = true;
+            for (let callback of this.websocketQueue) {
+                callback();
+            }
+            this.websocketQueue = [];
+        };
+
+        this.ws.onmessage = async (event) => {
+            const data = JSON.parse(event.data);
+            console.log("onmessage", data);
+            this.receiveWebsocketMessage(data);
+        };
+
+        this.ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        this.ws.onclose = () => {
+            console.log("Websocket connection closed");
+
+            // If the websocket was properly connected,
+            // set the last connection to the disconnection time.
+            // lastConnection is used to time when is best appropriate
+            // to reconnect, so keeping it recent helps with responsiveness.
+            if (this.websocketReady) {
+                this.lastConnection = new Date();
+            }
+
+            this.ws = null;
+            this.websocketReady = false;
+
+            for (let callback of this.closeListeners) {
+                callback();
+            }
+
+            const elapsed = new Date() - this.lastConnection;
+            const delay = Math.max(500, elapsed / 2);
+
+            setTimeout(() => {
+                this.connectWebsocket();
+            }, delay);
+        };
+    }
+
+    async configureWebsocket () {
+        let config = await configPromise;
+
+        if (config.token) {
+            let res = this.sendWs({
+                path: "auth",
+                body: {token: config.token},
+                nonce: false,
+                forced: true,
+            });
+        }
+    }
+
+    async sendWs (msg) {
+        let resultPromise;
+
+        let forced = Boolean(msg.forced);
+        if (msg.forced !== undefined) {
+            delete msg.forced;
+        }
+
+        if (msg.onResponse) {
+            const callback = msg.onResponse;
+            const nonce = msg.nonce = this.websocketNonce++;
+            delete msg.onResponse;
+
+            resultPromise = new Promise((resolve, reject) => {
+                this.nonceListeners[nonce] = {
+                    resolve: (msg) => {
+                        resolve();
+                        callback(msg);
+                    },
+                    reject
+                };
+            });
+        } else if (msg.nonce != null) {
+            const nonce = msg.nonce = this.websocketNonce++;
+
+            resultPromise = new Promise((resolve, reject) => {
+                this.nonceListeners[nonce] = {
+                    resolve: (msg) => {
+                        resolve(msg);
+                        delete this.nonceListeners[nonce];
+                    },
+                    reject
+                };
+            });
+        }
+
+        if (forced) {
+            this.ws.send(JSON.stringify(msg));
+            return;
+        }
+
+        // Trying sending until success.
+        let retry_time = RETRY_TIME;
+
+        while (true) {
+            if (!this.websocketReady) {
+                await new Promise(resolve => {
+                    this.websocketQueue.push(resolve)
+                })
+            }
+
+            try {
+                this.ws.send(JSON.stringify(msg));
+            } catch (e) {
+                console.error(e);
+                // Wait for a period
+                await new Promise(resolve => {
+                    setTimeout(retry_time, resolve);
+                })
+
+                // Increase the retry time by half it's current value
+                retry_time = (retry_time * 1.5) | 0;
+
+                // Don't let this iteration continue.
+                continue;
+            }
+
+            if (resultPromise) {
+                return await resultPromise;
+            }
+
+            // Break the send loop if no response is expected
+            break;
+        }
+    }
+
+    async receiveWebsocketMessage (msg) {
+        if (msg.nonce != null) {
+            let listener = this.nonceListeners[msg.nonce];
+
+            if (listener) {
+                delete msg.nonce;
+
+                if (msg.error) {
+                    listener.reject(msg.error);
+                } else {
+                    listener.resolve(msg);
+                }
+            }
+        }
+    }
+
+    async makeHeaders (params) {
+        let headers = {};
+
+        if (params && params.body !== undefined) {
+            headers['Content-Type'] = 'application/json';
+        }
+
+        return headers;
+    }
+
+    async handle (method, args = {}) {
+        const response = await this.sendWs({
+            path: "h/" + method,
+            body: encodeNet(args),
+            nonce: true,
+        });
+
+        return decodeNet(response.output);
+    }
+
+    async send (path, params={}) {
+        let query = "";
+
+        let config = await configPromise;
+        if (config.token) {
+            params.args = Object.assign({}, params.args || {}, {tk: config.token});
+        }
+
+        if (params.args) {
+            query = "?" + Object.entries(params.args)
+                .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+                .join('&');
+        }
+
+        if (path[0] == "/") {
+            path = path.slice(1);
+        }
+
+        const url = `${this.host}/${path}${query}`;
+        const response = await fetch(url, {
+            method: params.method || "GET",
+            headers: await this.makeHeaders({body: params.body !== undefined}),
+            body: params.body !== undefined ? JSON.stringify(params.body) : undefined,
+        });
+
+        if (!response.ok) {
+            /*try {
+                let text = await response.text();
+                console.error(text);
+            } catch (e) {}*/
+            throw new Error(`Request failed with status ${response.status}`);
+        }
+
+        if (params.onData) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        break;
+                    }
+
+                    params.onData(
+                        decoder.decode(value, { stream: true })
+                    );
+                }
+            } finally {
+                if (params.onClose) {
+                    params.onClose();
+                }
+            }
+
+        } else {
+            const data = await response.json();
+            return data;
+        }
+    }
+
+    async modelIndex (model) {
+        let res = await this.send(`/m/${model}/index`);
+        return res.entries;
+    }
+
+    getStream (stream_id) {
+        return new Stream(this, stream_id);
+    }
+}
+
+let promise = (async function () {
+    let config = await configPromise;
+    let hostUrl = config.hostUrl;
+
+    return new Horde(hostUrl);
+})();
+
+// Public Interface Functions
+
+async function getInstance (model, instance_id) {
+    let horde = await promise;
+    return new Instance(horde, model, instance_id);
+}
+
+async function createInstance (model, members=null) {
+    let horde = await promise;
+    let res = await horde.send(`/m/${model}/create`, {
+        method: 'POST',
+        body: members ? {members} : undefined,
+    });
+    return new Instance(horde, model, res.id);
+}
+
+async function login (email, password) {
+    let horde = await promise;
+    let res = await horde.send(`/user/login`, {
+        method:'POST',
+        body: {email, password},
+    });
+    return res.token;
+}
+
+async function signup (email, password) {
+    let horde = await promise;
+    let res = await horde.send(`/user/signup`, {
+        method:'POST',
+        body: {email, password},
+    });
+    return res.token;
+}
+
+async function getHorde () {
+    return await promise;
+}
+
+
+
+// COMPATIBILITY
+
+async function handle (method, inputs) {
+    let horde = await promise;
+    let res = await horde.handle(method, inputs);
+    return res;
+}
+

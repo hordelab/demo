@@ -465,7 +465,7 @@
 
             createSession();
 
-            let res = await handle('scripts/40', { transcript: text });
+            let res = await handle('@arnaud/vmed', { transcript: text });
 
             console.log(res);
             res.transcript = text;
@@ -489,15 +489,14 @@
             document.getElementById("transcript-input").value = "Generating Conversation...";
             switchPage('page-text');
 
-            let res = await handle("scripts/chat_completion", {
-                model: "gpt-3.5",
+            let res = await handle("openai/chat_completion", {
                 stream_moce: false,
                 messages: [{
                     "role": "user",
                     "content": "Escribe una transcripción de una sesión hipotética con un doctor especialista.",
                 }]
             });
-            document.getElementById("transcript-input").value = res.output;
+            document.getElementById("transcript-input").value = res.content;
         }
 
         let isRecording = false;

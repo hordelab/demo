@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Auto App</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.39.2/codemirror.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    #topBar {
+      background-color: #181f28;
+      color: #c5d9d9;
+      padding: 10px;
+      text-align: center;
+      cursor: pointer;
+      box-sizing: border-box;
+      flex-grow: 0;
+    }
+    #content {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      box-sizing: border-box;
+      flex-grow: 1;
+    }
+    .contentMode {
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+    }
+    .hidden {
+      display: none !important;
+    }
+
+    .button-menu {
+      flex-direction: column;
+      background-color: white;
+      z-index: 1;
+      width: 100%;
+      padding: 0;
+      margin: 0;
+      justify-content: flex-start;
+    }
+    .button-menu button {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      border: none;
+      background: white;
+      padding: 15px;
+      font-size: 16px;
+      width: 100%;
+      cursor: pointer;
+    }
+    .button-menu button:hover {
+      background-color: #f0f0f0;
+    }
+    .button-menu i {
+      margin-right: 10px;
+    }
+    #previewFrame {
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+      border: none;
+    }
+
+    .contentMode[data-mode="chat"] {
+      display: flex;
+      flex-direction: column;
+    }
+  </style>
+  <style type="text/css">
+    /* Chat Styles */
+
+    #message-history {
+      overflow-y: auto;
+      flex: 1;
+      padding: 10px;
+    }
+
+    .info {
+      padding: 0 0.8em;
+      margin-bottom: 0.7em;
+      white-space: preserve;
+    }
+
+    .info.interactive:hover {
+      color: darkblue;
+      cursor: pointer;
+    }
+
+    .message {
+      background-color: #f0f0f0;
+      color: #333;
+      border-radius: 5px;
+      padding: 0.5em 0.8em;
+      margin-bottom: 0.7em;
+      border: 1px solid #bbb;
+      white-space: preserve;
+    }
+
+    .message.outgoing {
+      margin-left: 1em;
+      align-self: flex-end;
+    }
+
+    .message.incoming {
+      margin-right: 1em;
+      align-self: flex-start;
+    }
+
+    .input-area {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      height: 5em;
+      border-top: 1px solid gray;
+    }
+
+    .input-area textarea {
+      flex: 1;
+      resize: none;
+      padding: 5px;
+      margin-right: 10px;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="topBar">Preview</div>
+  <div id="content">
+    <div id="menuMode" class="contentMode hidden" data-mode="menu">
+      <div class="button-menu">
+        <button onclick="pageHistoryBack();closeMenu()"><i class="fas fa-rotate-left"></i> Undo</button>
+        <button onclick="pageHistoryForward();closeMenu()"><i class="fas fa-rotate-right"></i> Redo</button>
+        <button onclick="clearChat();closeMenu()"><i class="fas fa-eraser"></i> Clear Chat</button>
+        <hr>
+        <button onclick="setMode('chat')"><i class="fas fa-comments"></i> Chat</button>
+        <button onclick="setMode('preview')"><i class="fas fa-eye"></i> Preview</button>
+        <button onclick="setMode('edit')"><i class="fas fa-pencil-alt"></i> Edit</button>
+        <button onclick="showOnly('projects')"><i class="fas fa-folder"></i> Projects</button>
+      </div>
+    </div>
+    <div class="contentMode hidden" data-mode="chat">
+      <div id="message-history">
+      </div>
+      <div class="input-area">
+        <textarea id="messageInput" placeholder="Type a message..."></textarea>
+        <button id="sendButton">Send</button>
+      </div>
+    </div>
+    <div class="contentMode hidden" data-mode="preview">
+      <iframe id="previewFrame"></iframe>
+    </div>
+    <div id="editMode" class="contentMode hidden" data-mode="edit" style="width: 100%; height: 100%"></div>
+    <div class="contentMode hidden" data-mode="projects">
+      <div class="button-menu">
+        <button><i class="fas fa-note-sticky"></i> Untitled</button>
+        <button><i class="fas fa-file"></i> Untitled</button>
+        <button><i class="fas fa-plus"></i> New</button>
+        <button><i class="fas fa-floppy-disk"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="horde.js"></script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.39.2/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.39.2/mode/htmlmixed/htmlmixed.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.39.2/mode/xml/xml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.39.2/mode/javascript/javascript.min.js"></script>
+
+  <script>
+    //=== Modes ===//
+
+    let currentMode = 'chat';
+    let previousMode = null;
+    const topBar = document.getElementById('topBar');
+
+    topBar.addEventListener('click', () => {
+      if (previousMode != null) {
+        closeMenu();
+      } else {
+        previousMode = currentMode;
+        currentMode = 'menu';
+        showOnly('menu');
+      }
+    });
+
+    function closeMenu () {
+      if (previousMode != null) {
+        setMode(previousMode);
+        previousMode = null;
+      }
+    }
+
+    function setMode(mode) {
+      currentMode = mode;
+      previousMode = null;
+      showOnly(mode);
+
+      if (mode == 'edit') {
+        codeEditor.setValue(pageSourceCode);
+        codeEditor.refresh();
+      } else if (mode != "menu" && editorDirty) {
+        console.log("Update from Editor");
+
+        // Add the new source code to the history and load it
+        let editorValue = codeEditor.getValue();
+
+        updatePageHistory(editorValue);
+        loadPageSource(editorValue);
+        editorDirty = false;
+      } else if (mode == 'preview') {
+        document.getElementById('previewFrame').location.reload(true);
+      }
+    }
+
+    function showOnly(mode) {
+      const modes = document.querySelectorAll('.contentMode');
+      modes.forEach(m => {
+        if (m.getAttribute('data-mode') === mode) {
+          m.classList.remove('hidden');
+        } else {
+          m.classList.add('hidden');
+        }
+      });
+      topBar.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+    }
+
+    // Initial display
+    showOnly(currentMode);
+  </script>
+
+  <script type="application/javascript">
+    //=== Page Loading ===//
+
+    // setting this value makes the llm less confused
+    const EMPTY_PAGE = "<!DOCTYPE html>\n<html></html>";
+    let pageSourceCode = EMPTY_PAGE;
+
+    const pageHistory = [];
+    let historyIndex = -1;
+
+    function updatePageHistory(newPageSource) {
+      pageHistory.splice(historyIndex + 1);
+      pageHistory.push(newPageSource);
+      historyIndex++;
+    }
+
+    function pageHistoryBack() {
+      if (historyIndex > 0) {
+        historyIndex--;
+        loadPageSource(pageHistory[historyIndex]);
+      }
+    }
+
+    function pageHistoryForward() {
+      if (historyIndex < pageHistory.length - 1) {
+        historyIndex++;
+      }
+      // Reload regardless
+      loadPageSource(pageHistory[historyIndex]);
+    }
+
+    function loadPageSource (newSource) {
+      pageSourceCode = newSource;
+
+      var blob = new Blob([newSource], { type: 'text/html' });
+      var url = URL.createObjectURL(blob);
+
+      document.getElementById('previewFrame').src = url;
+      codeEditor.setValue(newSource);
+
+      localStorage.setItem('pageSource', newSource);
+      manualEditing = false;
+    }
+
+    window.onload = function() {
+      const savedSource = localStorage.getItem('pageSource');
+      if (savedSource) {
+        updatePageHistory(savedSource);
+        loadPageSource(savedSource);
+      }
+    };
+  </script>
+
+  <script type="text/javascript">
+    //=== Chat and Bot Handling ===//
+
+    const agentAction = "@arnaud/demoer";
+    const history = [];
+
+    let updatedNotice = null;
+
+    async function agentProcess (message) {
+      let res = await handle(agentAction, {
+        messages: history,
+        current_file: pageSourceCode,
+      });
+
+      console.log("agent action response", res);
+
+      addMessage('incoming', res.response);
+      if (res.new_file) {
+        updatePageHistory(res.new_file);
+        loadPageSource(res.new_file);
+
+        document.getElementById('message-history').appendChild(getUpdatedNoticeElement());
+      }
+    }
+
+    function getUpdatedNoticeElement () {
+      if (updatedNotice == null) {
+        updatedNotice = document.createElement('div');
+        updatedNotice.textContent = "Page Updated";
+        updatedNotice.className = `info interactive`;
+
+        updatedNotice.addEventListener('click', function () {
+          setMode('preview');
+        });
+      }
+
+      return updatedNotice;
+    }
+
+    function addMessage(type, content) {
+      const typeRoles = {outgoing: 'user', incoming: 'assistant'};
+      const message = {
+        content,
+        role: typeRoles[type],
+      };
+      history.push(message);
+
+      const newMessage = document.createElement('div');
+      newMessage.textContent = content;
+      newMessage.className = `message ${type}`;
+      document.getElementById('message-history').appendChild(newMessage);
+    }
+
+    document.getElementById('sendButton').addEventListener('click', function() {
+      const message = document.getElementById('messageInput').value;
+      addMessage('outgoing', message);
+      document.getElementById('messageInput').value = '';
+
+      agentProcess();
+    });
+  </script>
+
+
+  <script type="text/javascript">
+    //=== Code Editing ===//
+    var codeEditor = CodeMirror(document.getElementById('editMode'), {
+      value: pageSourceCode,
+      mode: "htmlmixed",
+      indentUnit: 4,
+      tabSize: 4,
+      lineNumbers: true,
+    });
+    codeEditor.setSize("100%", "100%")
+
+    var editorDirty = false;
+
+    codeEditor.on('change', editorChanged);
+    function editorChanged () {
+      if (currentMode == "edit") {
+        editorDirty = true;
+      }
+    }
+  </script>
+
+  <script type="text/javascript">
+    // === Extra Functionality === //
+
+    function downloadSourceCode() {
+      const blob = new Blob([pageSourceCode], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      
+      a.href = url;
+      a.download = 'demoer-output.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    /*
+    document.getElementById('fileInput').addEventListener('change', uploadFile);
+    function uploadFile(event) {
+      const file = event.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          let source = e.target.result;
+
+          updatePageHistory(source);
+          loadPageSource(source);
+        };
+        reader.readAsText(file);
+      }
+    }
+    */
+
+    function clearChat () {
+      history.length = 0;
+      document.getElementById('message-history').innerHTML = "";
+    }
+
+    function clearPage () {
+      updatePageHistory(EMPTY_PAGE);
+      loadPageSource(EMPTY_PAGE);
+    }
+  </script>
+</body>
+</html>

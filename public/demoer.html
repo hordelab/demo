@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-<title>Web Application Layout</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.39.2/codemirror.min.css" />
+<title>Page Coder</title>
 <style>
   /*== Reset and Baseline == */
   html, body {
@@ -96,6 +97,16 @@
     border: none;
   }
 
+  #codeEditor {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    border: 1px solid gray;
+    padding: 10px;
+    box-sizing: border-box;
+    resize: none; /* Prevent resizing */
+  }
+
   /*== Tabs ==*/
 
   .tab-content {
@@ -156,7 +167,10 @@
     <div class="top-bar">
       <button class="top-bar-button" onclick="pageHistoryBack()">Undo</button>
       <button class="top-bar-button" onclick="pageHistoryForward()">Redo</button>
-      <button class="top-bar-button" onclick="alert('todo')">Reset Chat</button>
+      <button class="top-bar-button" onclick="clearChat()">Clear Chat</button>
+      <button class="top-bar-button" onclick="clearPage()">Clear Page</button>
+      <button class="top-bar-button" onclick="downloadSourceCode()">Download Source Code</button>
+      <input type="file" id="fileInput" class="top-bar-button" />
     </div>
     <div id="message-history">
     </div>
@@ -174,9 +188,7 @@
       <iframe id="previewFrame"></iframe>
     </div>
     <div data-tab="code" class="tab-content" style="display:none;">
-      <pre id="codeContainer">
-        Code
-      </pre>
+      <textarea id="codeEditor">Code</textarea>
     </div>
   </div>
 </div>
@@ -185,8 +197,9 @@
 
 <script type="application/javascript">
   //=== Page Loading ===//
-  // setting this value lets the llm be less confused
-  let pageSourceCode = "<!DOCTYPE html>\n<html><!html>";
+  // setting this value lets makes the llm less confused
+  const EMPTY_PAGE = "<!DOCTYPE html>\n<html><!html>";
+  let pageSourceCode = EMPTY_PAGE;
 
   const pageHistory = [];
   let historyIndex = -1;
@@ -207,8 +220,9 @@
   function pageHistoryForward() {
     if (historyIndex < pageHistory.length - 1) {
       historyIndex++;
-      loadPageSource(pageHistory[historyIndex]);
     }
+    // Reload regardless
+    loadPageSource(pageHistory[historyIndex]);
   }
 
   function loadPageSource (newSource) {
@@ -218,14 +232,52 @@
     var url = URL.createObjectURL(blob);
 
     document.getElementById('previewFrame').src = url;
-    document.getElementById('codeContainer').textContent = newSource;
+    document.getElementById('codeEditor').value = newSource;
+
+    localStorage.setItem('pageSource', newSource);
+    manualEditing = false;
+  }
+
+  window.onload = function() {
+    const savedSource = localStorage.getItem('pageSource');
+    if (savedSource) {
+      updatePageHistory(savedSource);
+      loadPageSource(savedSource);
+    }
+  };
+</script>
+
+<script type="text/javascript">
+  //=== Code Editing ===//
+  var editor = CodeMirror.fromTextArea(
+    document.getElementById('codeEditor'),
+    {lineNumbers: true}
+  );
+
+  var manualEditing = false;
+
+  document.getElementById('codeEditor').addEventListener('change', editorChanged);
+
+  // Implement the editorChanged function
+  function editorChanged () {
+    if (manualEditing) {
+      // Replace the most recent history entry with the new code
+      pageHistory[historyIndex] = document.getElementById('codeEditor').value;
+      loadPageSource(pageHistory[historyIndex]);
+    } else {
+      // Add the new source code to the history and load it
+      updatePageHistory(document.getElementById('codeEditor').value);
+      loadPageSource(pageHistory[historyIndex]);
+    }
+    // Loading unsets this flag. Restore after any change.
+    manualEditing = true;
   }
 </script>
 
 <script type="text/javascript">
   //=== Chat and Bot Handling ===//
 
-  let agentAction = "scripts/42";
+  let agentAction = "@arnaud/demoer";
   const history = [];
 
   async function agentProcess (message) {
@@ -266,7 +318,7 @@
   });
 </script>
 
-<script type="application/javascript">
+<script type="text/javascript">
   //=== Tabs ===//
 
   function openTab(name, tabButton) {
@@ -296,6 +348,48 @@
       openTab(tabName, this);
     });
   });
+</script>
+
+<script type="text/javascript">
+  // === Extra Functionality === //
+
+  function downloadSourceCode() {
+    const blob = new Blob([pageSourceCode], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    
+    a.href = url;
+    a.download = 'demoer-output.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  document.getElementById('fileInput').addEventListener('change', uploadFile);
+  function uploadFile(event) {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        let source = e.target.result;
+
+        updatePageHistory(source);
+        loadPageSource(source);
+      };
+      reader.readAsText(file);
+    }
+  }
+
+  function clearChat () {
+    history.length = 0;
+    document.getElementById('message-history').innerHTML = "";
+  }
+
+  function clearPage () {
+    updatePageHistory(EMPTY_PAGE);
+    loadPageSource(EMPTY_PAGE);
+  }
 </script>
 
 </body>
